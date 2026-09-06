@@ -1,16 +1,12 @@
 import json
 from pathlib import Path
-# from mutagen.oggvorbis import OggVorbis
-from mutagen.oggopus import OggOpus
-import random
 import dotenv
 import os
 import tls_client
 from requests_toolbelt.multipart.encoder import MultipartEncoder
-import base64
-# import io
-from pydub import AudioSegment
-import subprocess 
+from utils.headers import randomize_user_agent
+from utils.ogg import get_ogg_duration_ffprobe
+from utils.waveform import encode_waveform_ffmpeg
 
 """
 This is the initial version of the CLI app, it may look rough around the edges 
@@ -56,129 +52,6 @@ dotenv.load_dotenv()
 DISCORD_API = "https://discord.com/api/v9"
 IS_VOICE_MESSAGE = 1 << 13
 
-def randomize_user_agent() -> str:
-        discord_versions = [
-            "69548",
-            "69547",
-            "69546",
-            "69545"
-        ]
-        
-        darwin_versions = [
-            "24.3.0",
-            "24.2.0",
-            "24.1.0",
-            "23.3.0"
-        ]
-        
-        cfnetwork_versions = [
-            "3826.400.110",
-            "3826.400.100",
-            "3826.300.110"
-        ]
-        
-        version = random.choice(discord_versions)
-        darwin = random.choice(darwin_versions)
-        cfnet = random.choice(cfnetwork_versions)
-        
-        return f'Discord/{version} CFNetwork/{cfnet} Darwin/{darwin}'
-
-def get_ogg_duration(file_path: Path) -> float:
-    audio = OggOpus(file_path)
-    print(audio.info.length)
-    return audio.info.length
-
-def get_ogg_duration_ffprobe(file_path: Path) -> float:
-    result = subprocess.run(
-        [
-            "ffprobe", "-v", "error",
-            "-show_entries", "format=duration",
-            "-of", "json", str(file_path),
-        ],
-        capture_output=True, text=True, check=True,
-    )
-    data = json.loads(result.stdout)
-    return float(data["format"]["duration"])
-
-def encode_waveform(file_path, samples=256):
-    audio = AudioSegment.from_ogg(file_path)
-
-    # Convert to mono
-    audio = audio.set_channels(1)
-
-    # Get raw samples
-    raw = audio.get_array_of_samples()
-
-    # Divide the audio into `samples` buckets
-    bucket_size = max(1, len(raw) // samples)
-
-    waveform = []
-
-    for i in range(samples):
-        start = i * bucket_size
-        end = min(start + bucket_size, len(raw))
-
-        if start >= len(raw):
-            value = 0
-        else:
-            bucket = raw[start:end]
-
-            # Average absolute amplitude
-            value = sum(abs(x) for x in bucket) / len(bucket)
-
-        waveform.append(value)
-
-    # Normalize to 0-255
-    maximum = max(waveform) or 1
-    waveform = [
-        round((value / maximum) * 255)
-        for value in waveform
-    ]
-
-    return base64.b64encode(bytes(waveform)).decode("ascii")
-
-def encode_waveform_ffmpeg(file_path, samples=256):
-    """Uses FFmpeg directly to extract raw PCM data safely without pydub crashes."""
-    cmd = [
-        "ffmpeg", "-v", "error",
-        "-i", str(file_path),
-        "-f", "s16le",       # 16-bit Signed Integer PCM
-        "-acodec", "pcm_s16le",
-        "-ar", "8000",       # Low sample rate is fine for waveform calculations
-        "-ac", "1",          # Mono channel
-        "-"
-    ]
-    result = subprocess.run(cmd, capture_output=True, check=True)
-    raw_data = result.stdout
-    
-    # Convert binary buffer to list of integers
-    import struct
-    fmt = f"{len(raw_data) // 2}h"
-    raw_samples = list(struct.unpack(fmt, raw_data))
-
-    if not raw_samples:
-        return base64.b64encode(bytes([128] * samples)).decode("ascii")
-
-    bucket_size = max(1, len(raw_samples) // samples)
-    waveform = []
-
-    for i in range(samples):
-        start = i * bucket_size
-        end = min(start + bucket_size, len(raw_samples))
-
-        if start >= len(raw_samples):
-            value = 0
-        else:
-            bucket = raw_samples[start:end]
-            value = sum(abs(x) for x in bucket) / len(bucket)
-        waveform.append(value)
-
-    maximum = max(waveform) or 1
-    # Discord prefers amplitudes scaled between 0 and 255
-    waveform = [round((value / maximum) * 255) for value in waveform]
-
-    return base64.b64encode(bytes(waveform)).decode("ascii")
-
 def send_voice_message(
     token: str,
     channel_id: int,
@@ -220,15 +93,15 @@ def send_voice_message(
         payload.update(additional_payload)
 
     headers = {
-        'accept': '*/*',
-        'accept-language': 'fr-HU,en-HU;q=0.9,ar-HU;q=0.8,ru-HU;q=0.7,zh-Hant-HU;q=0.6,tr-HU;q=0.5,el-HU;q=0.4,am-HU;q=0.3,hi-HU;q=0.2,es-HU;q=0.1,my-HU;q=0.1',
-        'authorization': f"{token}",
-        'connection': 'keep-alive',
-        'host': 'discord.com',
-        'user-agent': randomize_user_agent(),
-        'x-debug-options': 'bugReporterEnabled',
-        'x-discord-locale': 'en-US',
-        'x-discord-timezone': 'Europe/Budapest',
+        "Accept": "*/*",
+        "Accept-Language": "fr-HU,en-HU;q=0.9,ar-HU;q=0.8,ru-HU;q=0.7,zh-Hant-HU;q=0.6,tr-HU;q=0.5,el-HU;q=0.4,am-HU;q=0.3,hi-HU;q=0.2,es-HU;q=0.1,my-HU;q=0.1",
+        "Authorization": f"{token}",
+        "Connection": "keep-alive",
+        "Host": "discord.com",
+        "User-Agent": randomize_user_agent(),
+        'X-Debug-Options': "bugReporterEnabled",
+        "X-Discord-Locale": "en-US",
+        "X-Discord-Timezone": "Europe/Budapest",
     }
 
     session = tls_client.Session()
@@ -251,7 +124,7 @@ def send_voice_message(
 
         headers = {
             **headers,
-            "content-type": multipart.content_type,
+            "Content-Type": multipart.content_type,
         }
 
         # NOTE: Using multipart.to_string().decode("latin-1") can corrupt the binary audio data payload.
