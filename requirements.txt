@@ -1,0 +1,4 @@
+mutagen
+tls-client
+requests-toolbelt
+pydub

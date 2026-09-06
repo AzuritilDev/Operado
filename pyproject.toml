@@ -1,0 +1,12 @@
+[project]
+name = "operado"
+version = "1.0.0"
+description = "An open-source CLI tool to send audio files as voice messages on Discord."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "mutagen>=1.48.1",
+    "pydub>=0.25.1",
+    "requests-toolbelt>=1.0.0",
+    "tls-client>=1.0.1",
+]
