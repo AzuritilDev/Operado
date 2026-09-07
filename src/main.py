@@ -1,7 +1,8 @@
 import json
 from pathlib import Path
-import dotenv
 import os
+import sys
+import argparse
 import tls_client
 from requests_toolbelt.multipart.encoder import MultipartEncoder
 from utils.headers import randomize_user_agent
@@ -46,26 +47,27 @@ codec_type=audio
 sample_rate=48000
 channels=1
 """
-
-dotenv.load_dotenv()
-
 DISCORD_API = "https://discord.com/api/v9"
 IS_VOICE_MESSAGE = 1 << 13
 
-def send_voice_message(
-    token: str,
-    channel_id: int,
-    audio_path: Path,
-    target_url: str,
-    repyling: bool,
-):
+def send_audio_file_as_voice_message(args):
+    audio_path = args.file
+    token = args.token
+    reply_id = args.reply
+    channel_id = args.channel
+    mention = args.mention
+    fail_if_not_exists = args.fail_if_not_exists
+
+    target_endpoint = f"{DISCORD_API}/channels/{channel_id}/messages"
+
     # CRITICAL: Always use ffprobe over Mutagen for Discord voice UI payload metrics
     duration = get_ogg_duration_ffprobe(audio_path)
 
     # Temporary/simple waveform.
     # This is NOT a real waveform yet.
     waveform = encode_waveform_ffmpeg(audio_path)
-    
+
+    # Request body
     payload = {
         "flags": IS_VOICE_MESSAGE,
         "attachments": [
@@ -78,15 +80,15 @@ def send_voice_message(
         ],
     }
 
-    if repyling == True:
+    if reply_id != 0:
         additional_payload = {"message_reference": {
                 "channel_id": str(channel_id),
-                "message_id": str(),
-                "fail_if_not_exists": False # True if you want the request to fail if the original message was deleted
+                "message_id": str(reply_id),
+                "fail_if_not_exists": True if fail_if_not_exists else False
             },
             # Optional: Control whether the reply sends a ping notification
             "allowed_mentions": {
-                "replied_user": False # Set to True if you want to ping the author of the original message
+                "replied_user": True if mention else False
             }
         }
 
@@ -128,9 +130,9 @@ def send_voice_message(
         }
 
         # NOTE: Using multipart.to_string().decode("latin-1") can corrupt the binary audio data payload.
-        # Pass the direct multipart object raw string or bytes natively into the session!
+        # Pass the direct multipart object raw string or bytes natively into the session
         response = session.post(
-            url=target_url,
+            url=target_endpoint,
             headers=headers,
             data=multipart.to_string() # Removed .decode("latin-1") to preserve binary layout integrity
         )
@@ -138,21 +140,27 @@ def send_voice_message(
         print(response.status_code)
         return response.status_code
 
-channel_id = int(os.getenv("CHANNEL_ID"))
+main_parser = argparse.ArgumentParser(description="OperadoCLI")
+subparsers = main_parser.add_subparsers(dest="command", required=True)
 
-wanted_url1 = f"{DISCORD_API}/channels/{channel_id}/messages"
-wanted_url2 = f"{DISCORD_API}/channels/@me/{channel_id}"
+parser_audio = subparsers.add_parser("audio")
+parser_audio.add_argument("token", help="Your OAuth2 Token.", type=str)
+parser_audio.add_argument("file", help="The file path to your .ogg audio file.", type=Path)
+parser_audio.add_argument("channel", help="ID of the channel you want to send the message to.", type=int)
+parser_audio.add_argument("--reply", "-ri", type=int, default=0)
+parser_audio.add_argument("--mention", "-mt", action=argparse.BooleanOptionalAction)
+parser_audio.add_argument("--fail-if-not-exists", "-fline", action=argparse.BooleanOptionalAction)
 
-def main():
-    send_voice_message(
-        token=str(os.getenv("TOKEN")),
-        channel_id=channel_id,
-        audio_path=Path(
-            r"file_name"
-        ),
-        target_url=wanted_url1,
-        repyling=False,
-    )
+COMMAND_MAP = {
+    "audio": send_audio_file_as_voice_message
+}
+
+def main(args : list[str]) -> None:
+    parsed_args = main_parser.parse_args(args=args) 
+    # fun fact: if you don't pass anything inside parse_args() it automatically passes sys.argv[1:] anyway
+    
+    chosen_cmd = COMMAND_MAP[parsed_args.command]
+    chosen_cmd(parsed_args)
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])
