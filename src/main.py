@@ -1,6 +1,5 @@
 import json
 from pathlib import Path
-import os
 import sys
 import argparse
 import tls_client
@@ -8,23 +7,10 @@ from requests_toolbelt.multipart.encoder import MultipartEncoder
 from utils.headers import randomize_user_agent
 from utils.ogg import get_ogg_duration_ffprobe
 from utils.waveform import encode_waveform_ffmpeg
-
+from utils.file_validation import validate_file_format, validate_path_structure
 """
 This is the initial version of the CLI app, it may look rough around the edges 
 so that's why it doesn't look very user friendly
-
-Add the following to the payload when you are replying to someone:
-
- # Add the reply reference block here:
-    "message_reference": {
-        "channel_id": str(channel_id),
-        "message_id": str(reply_message_id),
-        "fail_if_not_exists": False # True if you want the request to fail if the original message was deleted
-    },
-    # Optional: Control whether the reply sends a ping notification
-    "allowed_mentions": {
-        "replied_user": False # Set to True if you want to ping the author of the original message
-    }
 """
 
 """
@@ -50,6 +36,15 @@ channels=1
 DISCORD_API = "https://discord.com/api/v9"
 IS_VOICE_MESSAGE = 1 << 13
 
+COMMAND_HELP = {
+    "help": "Lists all the available commands.",
+    "audio": "Sends an audio file as a voice message."
+}
+
+def help(args):
+    for key, value in COMMAND_HELP.items():
+        print(f"[ {key} ] - ''{value}''")
+
 def send_audio_file_as_voice_message(args):
     audio_path = args.file
     token = args.token
@@ -57,6 +52,12 @@ def send_audio_file_as_voice_message(args):
     channel_id = args.channel
     mention = args.mention
     fail_if_not_exists = args.fail_if_not_exists
+
+    if validate_file_format(audio_path) and validate_path_structure(audio_path):
+        pass
+    else:
+        print("Invalid .ogg audio file.")
+        sys.exit(1)
 
     target_endpoint = f"{DISCORD_API}/channels/{channel_id}/messages"
 
@@ -143,6 +144,8 @@ def send_audio_file_as_voice_message(args):
 main_parser = argparse.ArgumentParser(description="OperadoCLI")
 subparsers = main_parser.add_subparsers(dest="command", required=True)
 
+parser_audio = subparsers.add_parser("help")
+
 parser_audio = subparsers.add_parser("audio")
 parser_audio.add_argument("token", help="Your OAuth2 Token.", type=str)
 parser_audio.add_argument("file", help="The file path to your .ogg audio file.", type=Path)
@@ -152,6 +155,7 @@ parser_audio.add_argument("--mention", "-mt", action=argparse.BooleanOptionalAct
 parser_audio.add_argument("--fail-if-not-exists", "-fline", action=argparse.BooleanOptionalAction)
 
 COMMAND_MAP = {
+    "help": help,
     "audio": send_audio_file_as_voice_message
 }
 
