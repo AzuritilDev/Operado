@@ -63,9 +63,6 @@ def send_audio_file_as_voice_message(args):
 
     # CRITICAL: Always use ffprobe over Mutagen for Discord voice UI payload metrics
     duration = get_ogg_duration_ffprobe(audio_path)
-
-    # Temporary/simple waveform.
-    # This is NOT a real waveform yet.
     waveform = encode_waveform_ffmpeg(audio_path)
 
     # Request body

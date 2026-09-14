@@ -1,3 +1,5 @@
 mutagen
 tls-client
 requests-toolbelt
+python-magic
+python-magic-bin
